@@ -1,30 +1,39 @@
 use crossterm::execute;
-pub use crossterm::{
+use crossterm::{
     cursor,
-    event::{self, read, Event, KeyCode, KeyEvent},
-    queue, style, terminal, Command, Result,
+    event::{read, Event, KeyCode},
+    queue, style, terminal, Result,
 };
 use std::io::{self, Stdout, Write};
+use std::sync::atomic;
+
+static COUNTER: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
+fn get_id() -> usize {
+    COUNTER.fetch_add(1, atomic::Ordering::Relaxed)
+}
 
 fn item_leaf(title: &str) -> Item {
-    Item {
-        title: String::from(title),
-        is_open: false,
-        children: Vec::new(),
-    }
+    item_with_children(title, Vec::new())
 }
 
 fn item_with_children(title: &str, children: Vec<Item>) -> Item {
     Item {
+        id: get_id(),
         title: String::from(title),
-        is_open: true,
+        is_open: children.len() > 0,
         children,
     }
 }
 struct Item {
+    id: usize,
     title: String,
     is_open: bool,
     children: Vec<Item>,
+}
+
+struct Tree {
+    root: Item,
+    selected_item: usize,
 }
 
 fn main() -> Result<()> {
@@ -56,6 +65,11 @@ fn main() -> Result<()> {
             item_leaf("Item 6"),
         ],
     );
+    let first_id = root.children[0].id;
+    let mut tree = Tree {
+        root,
+        selected_item: first_id,
+    };
 
     queue!(
         w,
@@ -73,20 +87,26 @@ fn main() -> Result<()> {
             cursor::MoveTo(0, 0),
         )?;
 
-        fn traverse(w: &mut Stdout, items: &Vec<Item>, level: usize) -> Result<()> {
+        fn traverse(w: &mut Stdout, tree: &Tree, items: &Vec<Item>, level: usize) -> Result<()> {
             for item in items {
-                print_item(w, item, level)?;
+                print_item(w, tree, item, level)?;
 
                 if item.is_open {
-                    traverse(w, &item.children, level + 1)?;
+                    traverse(w, tree, &item.children, level + 1)?;
                 }
             }
             Ok(())
         }
 
-        fn print_item(w: &mut Stdout, item: &Item, level: usize) -> Result<()> {
-            if item.title == "Item 2" {
-                queue!(w, style::SetForegroundColor(style::Color::Red))?;
+        fn print_item(w: &mut Stdout, tree: &Tree, item: &Item, level: usize) -> Result<()> {
+            let selected_color = style::Color::Rgb {
+                r: 29,
+                g: 31,
+                b: 35,
+            };
+
+            if tree.selected_item == item.id {
+                queue!(w, style::SetBackgroundColor(selected_color))?;
             }
 
             let circle = if item.children.is_empty() {
@@ -94,21 +114,33 @@ fn main() -> Result<()> {
             } else {
                 "●"
             };
-            println!(" {}{} {}", "  ".repeat(level), circle, item.title);
+            println!(
+                " {}{} {}{}",
+                "  ".repeat(level),
+                circle,
+                item.title,
+                "  ".repeat(30),
+            );
 
-            if item.title == "Item 2" {
-                queue!(w, style::SetForegroundColor(style::Color::White))?;
+            if tree.selected_item == item.id {
+                queue!(w, style::ResetColor)?;
             }
 
             Ok(())
         }
 
-        traverse(&mut w, &root.children, 0)?;
+        traverse(&mut w, &tree, &tree.root.children, 0)?;
 
         w.flush()?;
         let event = read()?;
         if event == Event::Key(KeyCode::Char('q').into()) {
             break;
+        } else if event == Event::Key(KeyCode::Down.into()) {
+            tree.selected_item += 1;
+        } else if event == Event::Key(KeyCode::Up.into()) {
+            if tree.selected_item > 0 {
+                tree.selected_item -= 1;
+            }
         }
     }
 
