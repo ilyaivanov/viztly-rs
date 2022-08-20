@@ -24,6 +24,8 @@ fn item_with_children(title: &str, children: Vec<Item>) -> Item {
         children,
     }
 }
+
+#[derive(Debug)]
 struct Item {
     id: usize,
     title: String,
@@ -71,6 +73,8 @@ fn main() -> Result<()> {
         selected_item: first_id,
     };
 
+    let mut extra_messages: Vec<String> = Vec::new();
+
     queue!(
         w,
         terminal::EnterAlternateScreen,
@@ -99,14 +103,8 @@ fn main() -> Result<()> {
         }
 
         fn print_item(w: &mut Stdout, tree: &Tree, item: &Item, level: usize) -> Result<()> {
-            let selected_color = style::Color::Rgb {
-                r: 29,
-                g: 31,
-                b: 35,
-            };
-
             if tree.selected_item == item.id {
-                queue!(w, style::SetBackgroundColor(selected_color))?;
+                queue!(w, style::SetBackgroundColor(gray(53)))?;
             }
 
             let circle = if item.children.is_empty() {
@@ -131,6 +129,12 @@ fn main() -> Result<()> {
 
         traverse(&mut w, &tree, &tree.root.children, 0)?;
 
+        queue!(w, style::SetForegroundColor(gray(173)))?;
+        println!("");
+        for line in &extra_messages {
+            println!("{}", line);
+        }
+        queue!(w, style::ResetColor)?;
         w.flush()?;
         let event = read()?;
         if event == Event::Key(KeyCode::Char('q').into()) {
@@ -140,6 +144,16 @@ fn main() -> Result<()> {
         } else if event == Event::Key(KeyCode::Up.into()) {
             if tree.selected_item > 0 {
                 tree.selected_item -= 1;
+            }
+        } else if event == Event::Key(KeyCode::Left.into()) {
+            match find_item_with_parent(&tree.root, tree.selected_item) {
+                Some((parent, child)) => {
+                    let msg = format!("{} - {}", parent.title, child.title);
+                    extra_messages.push(msg);
+                }
+                _ => {
+                    extra_messages.push("Not Found".to_string());
+                }
             }
         }
     }
@@ -152,3 +166,28 @@ fn main() -> Result<()> {
     )?;
     Ok(())
 }
+
+// color utils
+fn gray(v: u8) -> style::Color {
+    style::Color::Rgb { r: v, g: v, b: v }
+}
+
+fn find_item_with_parent(item: &Item, id: usize) -> Option<(&Item, &Item)> {
+    if !item.is_open {
+        return None;
+    } else {
+        for child in &item.children {
+            if child.id == id {
+                return Some((item, child));
+            } else if child.is_open {
+                match find_item_with_parent(child, id) {
+                    Some(res) => return Some(res),
+                    _ => {}
+                }
+            }
+        }
+    }
+    return None;
+}
+
+// fn on_left_key(tree: &mut Tree) {}
